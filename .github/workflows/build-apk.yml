@@ -1,4 +1,4 @@
-name: SR AI Photo Studio - Studio Design 1.2 (Gradle 8.9)
+name: SR AI Photo Studio - Precision Studio 1.4 (Gradle 8.9)
 on:
   push:
   workflow_dispatch:
@@ -18,9 +18,9 @@ jobs:
           python3 - <<'PY'
           import os, pathlib, zipfile, tempfile, shutil, stat
           root = pathlib.Path(os.environ['GITHUB_WORKSPACE']).resolve()
-          target = root / 'SR_AI_Photo_Studio_Design_Source.zip'
+          target = root / 'SR_AI_Photo_Studio_Precision_Source.zip'
           def valid(p):
-              required = ['settings.gradle','build.gradle','gradle.properties','app/build.gradle','app/src/main/AndroidManifest.xml','app/src/main/java/com/srcreationfarm/photostudio/MainActivity.java','app/src/main/java/com/srcreationfarm/photostudio/ImageEngine.java','app/src/main/java/com/srcreationfarm/photostudio/PixelMath.java','app/src/main/java/com/srcreationfarm/photostudio/ProjectStore.java','app/src/main/res/values/styles.xml','app/src/main/res/drawable/ic_studio.xml','tests/PixelMathTest.java','app/src/main/java/com/srcreationfarm/photostudio/CropGeometry.java','tests/CropGeometryTest.java']
+              required = ['settings.gradle','build.gradle','gradle.properties','app/build.gradle','app/src/main/AndroidManifest.xml','app/src/main/java/com/srcreationfarm/photostudio/MainActivity.java','app/src/main/java/com/srcreationfarm/photostudio/ImageEngine.java','app/src/main/java/com/srcreationfarm/photostudio/PixelMath.java','app/src/main/java/com/srcreationfarm/photostudio/ProjectStore.java','app/src/main/res/values/styles.xml','app/src/main/res/drawable/ic_studio.xml','tests/PixelMathTest.java','app/src/main/java/com/srcreationfarm/photostudio/CropGeometry.java','tests/CropGeometryTest.java','app/src/main/java/com/srcreationfarm/photostudio/CutoutMath.java','app/src/main/java/com/srcreationfarm/photostudio/CutoutEngine.java','tests/CutoutMathTest.java']
               return all((p/x).is_file() for x in required)
           if target.is_file():
               dest = pathlib.Path(tempfile.mkdtemp(prefix='sr-photo-', dir=os.environ['RUNNER_TEMP']))
@@ -37,9 +37,9 @@ jobs:
               candidates = [root]
           else:
               candidates = [p.parent for p in root.rglob('settings.gradle') if '.git' not in p.parts and valid(p.parent)]
-          if len(candidates) != 1: raise SystemExit('Upload SR_AI_Photo_Studio_Design_Source.zip at repository root, or exactly one extracted project.')
+          if len(candidates) != 1: raise SystemExit('Upload SR_AI_Photo_Studio_Precision_Source.zip at repository root, or exactly one extracted project.')
           project = candidates[0]
-          if "version '8.7.3'" not in (project/'build.gradle').read_text() or 'compileSdk 35' not in (project/'app/build.gradle').read_text() or "versionName '1.2.0'" not in (project/'app/build.gradle').read_text(): raise SystemExit('Wrong source revision / build configuration')
+          if "version '8.7.3'" not in (project/'build.gradle').read_text() or 'compileSdk 35' not in (project/'app/build.gradle').read_text() or "versionName '1.4.0'" not in (project/'app/build.gradle').read_text(): raise SystemExit('Wrong source revision / build configuration')
           with open(os.environ['GITHUB_ENV'],'a') as f: f.write('PROJECT_DIR='+str(project)+'\n')
           print('Using:',project)
           PY
@@ -72,9 +72,10 @@ jobs:
           grep -qx 'Gradle 8.9' <<< "$version"
           java -version
           classes="$(mktemp -d)"
-          javac --release 17 -d "$classes" app/src/main/java/com/srcreationfarm/photostudio/PixelMath.java app/src/main/java/com/srcreationfarm/photostudio/CropGeometry.java tests/PixelMathTest.java tests/CropGeometryTest.java
+          javac --release 17 -d "$classes" app/src/main/java/com/srcreationfarm/photostudio/PixelMath.java app/src/main/java/com/srcreationfarm/photostudio/CropGeometry.java tests/PixelMathTest.java tests/CropGeometryTest.java app/src/main/java/com/srcreationfarm/photostudio/CutoutMath.java tests/CutoutMathTest.java
           java -cp "$classes" com.srcreationfarm.photostudio.PixelMathTest
           java -cp "$classes" com.srcreationfarm.photostudio.CropGeometryTest
+          java -cp "$classes" com.srcreationfarm.photostudio.CutoutMathTest
       - name: Check dependency metadata, compile APK and lint
         run: |
           set -euo pipefail
