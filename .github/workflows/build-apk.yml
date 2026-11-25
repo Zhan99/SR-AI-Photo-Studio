@@ -1,0 +1,115 @@
+name: SR AI Photo Studio - Studio Design 1.2 (Gradle 8.9)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve and validate source
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, zipfile, tempfile, shutil, stat
+          root = pathlib.Path(os.environ['GITHUB_WORKSPACE']).resolve()
+          target = root / 'SR_AI_Photo_Studio_Design_Source.zip'
+          def valid(p):
+              required = ['settings.gradle','build.gradle','gradle.properties','app/build.gradle','app/src/main/AndroidManifest.xml','app/src/main/java/com/srcreationfarm/photostudio/MainActivity.java','app/src/main/java/com/srcreationfarm/photostudio/ImageEngine.java','app/src/main/java/com/srcreationfarm/photostudio/PixelMath.java','app/src/main/java/com/srcreationfarm/photostudio/ProjectStore.java','app/src/main/res/values/styles.xml','app/src/main/res/drawable/ic_studio.xml','tests/PixelMathTest.java','app/src/main/java/com/srcreationfarm/photostudio/CropGeometry.java','tests/CropGeometryTest.java']
+              return all((p/x).is_file() for x in required)
+          if target.is_file():
+              dest = pathlib.Path(tempfile.mkdtemp(prefix='sr-photo-', dir=os.environ['RUNNER_TEMP']))
+              with zipfile.ZipFile(target) as z:
+                  if sum(x.file_size for x in z.infolist()) > 300_000_000: raise SystemExit('Source ZIP exceeds 300 MB expanded')
+                  seen = set()
+                  for f in z.infolist():
+                      p = pathlib.PurePosixPath(f.filename)
+                      if p.is_absolute() or '..' in p.parts or '\\' in f.filename or stat.S_ISLNK(f.external_attr >> 16) or p in seen: raise SystemExit('Unsafe ZIP entry: '+f.filename)
+                      seen.add(p)
+                  z.extractall(dest)
+              candidates = [p.parent for p in dest.rglob('settings.gradle') if valid(p.parent)]
+          elif valid(root):
+              candidates = [root]
+          else:
+              candidates = [p.parent for p in root.rglob('settings.gradle') if '.git' not in p.parts and valid(p.parent)]
+          if len(candidates) != 1: raise SystemExit('Upload SR_AI_Photo_Studio_Design_Source.zip at repository root, or exactly one extracted project.')
+          project = candidates[0]
+          if "version '8.7.3'" not in (project/'build.gradle').read_text() or 'compileSdk 35' not in (project/'app/build.gradle').read_text() or "versionName '1.2.0'" not in (project/'app/build.gradle').read_text(): raise SystemExit('Wrong source revision / build configuration')
+          with open(os.environ['GITHUB_ENV'],'a') as f: f.write('PROJECT_DIR='+str(project)+'\n')
+          print('Using:',project)
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Configure Android SDK
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK"
+          MANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$MANAGER" ]]; then MANAGER="$(command -v sdkmanager)"; fi
+          "$MANAGER" --sdk_root="$SDK" --licenses < <(yes)
+          "$MANAGER" --sdk_root="$SDK" 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
+          test -f "$SDK/platforms/android-35/android.jar"
+          test -x "$SDK/build-tools/35.0.0/apksigner"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Verify toolchain and run JVM tests
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          version="$(gradle --version)"
+          printf '%s\n' "$version"
+          grep -qx 'Gradle 8.9' <<< "$version"
+          java -version
+          classes="$(mktemp -d)"
+          javac --release 17 -d "$classes" app/src/main/java/com/srcreationfarm/photostudio/PixelMath.java app/src/main/java/com/srcreationfarm/photostudio/CropGeometry.java tests/PixelMathTest.java tests/CropGeometryTest.java
+          java -cp "$classes" com.srcreationfarm.photostudio.PixelMathTest
+          java -cp "$classes" com.srcreationfarm.photostudio.CropGeometryTest
+      - name: Check dependency metadata, compile APK and lint
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          mkdir -p "$RUNNER_TEMP/sr-photo-logs"
+          gradle --no-daemon --console=plain :app:checkDebugAarMetadata :app:assembleDebug :app:lintDebug 2>&1 | tee "$RUNNER_TEMP/sr-photo-logs/build.txt"
+      - name: Verify APK signature and offline permission
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          apk='app/build/outputs/apk/debug/app-debug.apk'
+          test -s "$apk"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$apk"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$apk" > "$RUNNER_TEMP/sr-photo-logs/permissions.txt"
+          if grep -q 'android.permission.INTERNET' "$RUNNER_TEMP/sr-photo-logs/permissions.txt"; then echo 'Unexpected INTERNET permission'; exit 1; fi
+          unzip -tq "$apk"
+          unzip -Z1 "$apk" > "$RUNNER_TEMP/sr-photo-logs/apk-entries.txt"
+          mkdir -p "$RUNNER_TEMP/sr-photo-apk"
+          cp "$apk" "$RUNNER_TEMP/sr-photo-apk/SR-AI-Photo-Studio-debug.apk"
+          sha256sum "$RUNNER_TEMP/sr-photo-apk/SR-AI-Photo-Studio-debug.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SR-AI-Photo-Studio-APK
+          path: ${{ runner.temp }}/sr-photo-apk/*.apk
+          if-no-files-found: error
+      - name: Report primary errors
+        if: failure()
+        run: |
+          if [[ -f "$RUNNER_TEMP/sr-photo-logs/build.txt" ]]; then
+            { echo '### Android build diagnostics'; echo '```'; grep -A 55 -m 1 -E "What went wrong|FAILURE:| error:|^e: " "$RUNNER_TEMP/sr-photo-logs/build.txt" || tail -n 100 "$RUNNER_TEMP/sr-photo-logs/build.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: SR-Photo-Build-Reports
+          path: |
+            ${{ runner.temp }}/sr-photo-logs/
+            ${{ env.PROJECT_DIR }}/app/build/reports/
+          if-no-files-found: ignore
