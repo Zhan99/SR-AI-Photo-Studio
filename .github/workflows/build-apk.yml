@@ -1,5 +1,6 @@
 name: SR AI Photo Studio - Studio Design 1.2 (Gradle 8.9)
 on:
+  push:
   workflow_dispatch:
 permissions:
   contents: read
